@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Project report for a privacy-conscious Gmail to Google Sheets job application tracker built with Google Apps Script.">
+  <title>Job Application Tracker — Project Report</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="hero">
+    <div class="container">
+      <p class="eyebrow">OPEN-SOURCE PROJECT REPORT</p>
+      <h1>Job Application Tracker</h1>
+      <p class="lead">Automatically collect job application confirmation emails from Gmail and organize them in Google Sheets.</p>
+      <div class="pills">
+        <span>Google Apps Script</span><span>Gmail API</span><span>Google Sheets</span><span>Read-only Gmail access</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="notice">
+      <strong>Project status: working prototype</strong>
+      <p>The initial import has successfully written records to the spreadsheet in batches of 10. Historical coverage, extraction accuracy, and automated scheduling still need validation before this should be treated as a complete tracker.</p>
+    </section>
+
+    <section>
+      <h2>1. Overview</h2>
+      <p>Job applications often generate confirmation emails from employers, applicant-tracking systems, and job platforms. Manually copying each confirmation into a tracker is repetitive and makes it easy to miss applications.</p>
+      <p>This project uses Gmail search and the Gmail API to find likely application messages, extracts basic metadata, and appends records to a Google Sheet. It is designed to avoid duplicate imports by storing each Gmail message ID.</p>
+    </section>
+
+    <section>
+      <h2>2. Goals</h2>
+      <ul>
+        <li>Collect application-related emails from Gmail.</li>
+        <li>Record application date, company, position, source, status, last communication, and email subject.</li>
+        <li>Import historical messages in small batches to reduce API quota pressure.</li>
+        <li>Prevent duplicate rows using the unique Gmail message ID.</li>
+        <li>Keep Gmail access read-only; the script does not need permission to send or delete email.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>3. Architecture</h2>
+      <div class="flow" aria-label="Data flow">
+        <div class="flow-step"><b>Gmail</b><span>Search matching messages</span></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step"><b>Apps Script</b><span>Read, parse, deduplicate</span></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step"><b>Google Sheets</b><span>Append tracker rows</span></div>
+      </div>
+      <p>The Advanced Gmail API is used instead of the broad <code>GmailApp</code> service. The intended OAuth scopes are:</p>
+      <ul>
+        <li><code>https://www.googleapis.com/auth/gmail.readonly</code></li>
+        <li><code>https://www.googleapis.com/auth/spreadsheets.currentonly</code></li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>4. Spreadsheet schema</h2>
+      <p>The simplified <code>Applications</code> worksheet uses eight columns:</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Column</th><th>Field</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td>A</td><td>Email ID</td><td>Unique Gmail message ID; used for deduplication.</td></tr>
+            <tr><td>B</td><td>Application Date</td><td>Date/time the message was received.</td></tr>
+            <tr><td>C</td><td>Company</td><td>Best-effort company estimate; may need review.</td></tr>
+            <tr><td>D</td><td>Position</td><td>Best-effort title extracted from the subject.</td></tr>
+            <tr><td>E</td><td>Source</td><td>LinkedIn or Company / Other.</td></tr>
+            <tr><td>F</td><td>Status</td><td>Initially set to “Applied - needs review”.</td></tr>
+            <tr><td>G</td><td>Last Communication</td><td>Initially set to the email date.</td></tr>
+            <tr><td>H</td><td>Email Subject</td><td>Original message subject for traceability.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Location, Job URL, Contact Person, Contact Email, and Follow-up Date were removed from the requested layout.</p>
+    </section>
+
+    <section>
+      <h2>5. Historical import and batching</h2>
+      <p>Gmail API quota limits were encountered when the script fetched too many individual messages in a short period. The import was therefore reduced to batches of up to 10 messages per execution.</p>
+      <p>The script stores a Gmail page token in Apps Script Properties and resumes from that token on the next run. Existing message IDs are loaded from the sheet before writing, preventing already-imported messages from being appended again.</p>
+      <div class="callout">
+        <strong>Target historical window</strong>
+        <p>The requested coverage is the last six years (a rolling six-year window). For a run on 16 November 2026, that is approximately 16 November 2020 onward. Use Gmail's <code>newer_than:6y</code> search operator when starting a fresh six-year search.</p>
+      </div>
+      <p><strong>Important:</strong> Do not change the Gmail query while a paginated import is in progress. Finish the current run first. If the query is changed, reset the saved pagination token and completion flag deliberately, then restart from the first page. Keep the sheet's Email ID deduplication check in place.</p>
+      <p>At the point captured in the project notes, the script had imported batches successfully, but visible rows were still dated in 2026. That does not prove older mail is absent; the import must continue through subsequent pages and the oldest imported date must be checked.</p>
+    </section>
+
+    <section>
+      <h2>6. Current extraction logic</h2>
+      <ul>
+        <li><strong>Application date:</strong> derived from Gmail's internal message timestamp.</li>
+        <li><strong>Company:</strong> estimated from the sender's email domain.</li>
+        <li><strong>Position:</strong> extracted from a small set of subject-line patterns.</li>
+        <li><strong>Source:</strong> classified as LinkedIn when the sender or message content contains “LinkedIn”; otherwise Company / Other.</li>
+        <li><strong>Status:</strong> initialized to “Applied - needs review”.</li>
+      </ul>
+      <p>This is intentionally a first-pass parser. Sender domains such as Workday or Greenhouse often identify the applicant-tracking provider rather than the employer. Many confirmation emails also have different subject wording or HTML-only bodies.</p>
+    </section>
+
+    <section>
+      <h2>7. Known limitations and risks</h2>
+      <ul>
+        <li><strong>Search coverage:</strong> the current Gmail query looks for a limited set of subject phrases. It can miss confirmations with other wording, or include unrelated messages.</li>
+        <li><strong>Company accuracy:</strong> domain-based extraction can return the ATS provider rather than the hiring company.</li>
+        <li><strong>Position accuracy:</strong> title extraction only checks the subject, so many titles will remain “Needs review”.</li>
+        <li><strong>Body parsing:</strong> MIME structures vary; some parts may have no inline body data, and HTML-only messages may not be parsed into useful text.</li>
+        <li><strong>Quota limits:</strong> a six-year import may require many executions. Wait and retry after quota errors.</li>
+        <li><strong>Message versus thread:</strong> the script records individual messages, not necessarily one consolidated application conversation. Follow-up emails can therefore create additional rows if they match the search.</li>
+        <li><strong>Privacy:</strong> email contents are processed by the user's Google Apps Script project and written to their own spreadsheet. Avoid publishing personal email data, message IDs, or logs in the public repository.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>8. Setup summary</h2>
+      <ol>
+        <li>Create a Google Sheet named <code>Job Application Tracker</code> and a tab named <code>Applications</code>.</li>
+        <li>Add the eight headers listed above in row 1.</li>
+        <li>Open Extensions → Apps Script.</li>
+        <li>Enable the Advanced Gmail service (Gmail API v1).</li>
+        <li>Configure the manifest with the two read-only/current-spreadsheet OAuth scopes listed in this report.</li>
+        <li>Add the Apps Script importer and helper functions.</li>
+        <li>Run the importer and review the authorization prompt carefully.</li>
+        <li>Run repeated batches until the import reports completion; verify the oldest date is within the six-year window.</li>
+      </ol>
+      <p>Google may require enabling the Gmail API in the associated Google Cloud project as well as adding it as an Apps Script advanced service.</p>
+    </section>
+
+    <section>
+      <h2>9. Roadmap</h2>
+      <div class="roadmap">
+        <article><span class="state done">Prototype</span><h3>Basic import</h3><p>Read matching messages, write rows, and avoid duplicate message IDs.</p></article>
+        <article><span class="state next">Next</span><h3>Reliable six-year backfill</h3><p>Complete pagination, validate the oldest imported date, and safely handle quota retries.</p></article>
+        <article><span class="state planned">Planned</span><h3>Better extraction</h3><p>Parse message bodies and common ATS templates to identify the actual employer and role.</p></article>
+        <article><span class="state planned">Planned</span><h3>Broader search rules</h3><p>Expand matching phrases and sender patterns, then review false positives.</p></article>
+        <article><span class="state planned">Planned</span><h3>Daily automation</h3><p>Add a time-driven trigger to check for new messages without manual runs.</p></article>
+        <article><span class="state planned">Planned</span><h3>Application lifecycle</h3><p>Detect interview invitations, rejections, offers, and other status changes.</p></article>
+      </div>
+    </section>
+
+    <section>
+      <h2>10. Publishing this project on GitHub</h2>
+      <p>Publish the documentation and reusable source code only. Do not commit real spreadsheet exports, email content, OAuth tokens, personal addresses, or execution logs containing private information.</p>
+      <p>Suggested repository name: <code>gmail-job-application-tracker</code>.</p>
+      <p>Recommended future repository structure:</p>
+      <pre><code>gmail-job-application-tracker/
+├── README.md
+├── index.html
+├── styles.css
+├── apps-script/
+│   ├── Code.gs
+│   └── appsscript.json
+└── LICENSE</code></pre>
+      <p>The Apps Script source and manifest should be added only after removing account-specific values and verifying the final implementation.</p>
+    </section>
+
+    <footer>
+      <p>Project report · Prepared 16 November 2026 · Technical status reflects the conversation notes and should be revalidated before public release.</p>
+    </footer>
+  </main>
+</body>
+</html>
